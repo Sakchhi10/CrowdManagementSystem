@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useI18n } from '../i18n/I18nContext';
 import { useLive } from '../live/LiveContext';
 import { alertTitle, SeverityBadge } from './AlertsPanel';
 import { PinIcon } from './Icons';
@@ -9,6 +10,7 @@ const MAX_TOASTS = 3;
 // Short-lived pop-ups for incoming alerts; the full history stays in the alerts drawer.
 export default function Toasts() {
   const { subscribeAlerts, siteId } = useLive();
+  const { t } = useI18n();
   const [toasts, setToasts] = useState([]);
   const siteRef = useRef(siteId);
   siteRef.current = siteId;
@@ -25,14 +27,14 @@ export default function Toasts() {
 
   return (
     <div className="toasts" aria-live="polite">
-      {toasts.map((t) => (
-        <div key={t.id} className={`toast toast-${t.severity}`}>
-          <div className="toast-title">{alertTitle(t)}</div>
+      {toasts.map((toast) => (
+        <div key={toast.id} className={`toast toast-${toast.severity}`}>
+          <div className="toast-title">{alertTitle(toast, t)}</div>
           <div className="alert-foot">
             <span className="alert-zone">
-              <PinIcon width={14} height={14} /> {t.zone}
+              <PinIcon width={14} height={14} /> {toast.zone}
             </span>
-            <SeverityBadge severity={t.severity} />
+            <SeverityBadge severity={toast.severity} />
           </div>
         </div>
       ))}

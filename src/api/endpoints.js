@@ -4,6 +4,21 @@ import * as demo from './demo';
 
 export const isDemoSession = () => getToken() === demo.DEMO_TOKEN;
 
+// The analytics service answers one request in ~1-6 s, but several at once stall until they
+// all time out. So analytics calls go out one at a time, in the order they were made; the
+// timeout only starts once a call is actually sent, not while it waits in line. A call whose
+// signal was aborted while queued (its page moved on) is skipped instead of sent.
+const ANALYTICS_TIMEOUT_MS = 30000;
+let analyticsQueue = Promise.resolve();
+function postAnalytics(path, body, signal) {
+  const run = analyticsQueue.then(() => {
+    if (signal?.aborted) throw Object.assign(new Error('Request cancelled'), { name: 'CanceledError' });
+    return client.post(path, body, { signal, timeout: ANALYTICS_TIMEOUT_MS });
+  });
+  analyticsQueue = run.catch(() => {});
+  return run;
+}
+
 // Response shapes for occupancy/demographics/login are not documented in Swagger,
 // so the parsers below accept the common variants instead of a single fixed shape.
 
@@ -49,24 +64,24 @@ export async function getSites() {
   return pickArray(data, ['sites', 'items']);
 }
 
-export async function getFootfall(body) {
+export async function getFootfall(body, signal) {
   if (isDemoSession()) return demo.demoFootfall(body);
-  const { data } = await client.post('/api/analytics/footfall', body);
+  const { data } = await postAnalytics('/api/analytics/footfall', body, signal);
   return { footfall: pickNumber(data, ['footfall', 'count', 'total']) ?? 0, raw: data };
 }
 
-export async function getDwell(body) {
+export async function getDwell(body, signal) {
   if (isDemoSession()) return demo.demoDwell(body);
-  const { data } = await client.post('/api/analytics/dwell', body);
+  const { data } = await postAnalytics('/api/analytics/dwell', body, signal);
   return {
     avgDwellMinutes: pickNumber(data, ['avgDwellMinutes', 'averageDwellMinutes', 'avgDwell']) ?? 0,
     dwellRecords: pickNumber(data, ['dwellRecords', 'count']) ?? 0,
   };
 }
 
-export async function getOccupancy(body) {
+export async function getOccupancy(body, signal) {
   if (isDemoSession()) return demo.demoOccupancy(body);
-  const { data } = await client.post('/api/analytics/occupancy', body);
+  const { data } = await postAnalytics('/api/analytics/occupancy', body, signal);
   const buckets = pickArray(data, ['buckets', 'series', 'timeline', 'hours', 'items'])
     .map((b) => ({
       t: bucketTime(b),
@@ -78,9 +93,9 @@ export async function getOccupancy(body) {
   return { buckets, live };
 }
 
-export async function getDemographics(body) {
+export async function getDemographics(body, signal) {
   if (isDemoSession()) return demo.demoDemographics(body);
-  const { data } = await client.post('/api/analytics/demographics', body);
+  const { data } = await postAnalytics('/api/analytics/demographics', body, signal);
   const buckets = pickArray(data, ['buckets', 'series', 'timeline', 'hours', 'items'])
     .map((b) => ({
       t: bucketTime(b),
@@ -98,9 +113,9 @@ export async function getDemographics(body) {
   };
 }
 
-export async function getEntryExit(body) {
+export async function getEntryExit(body, signal) {
   if (isDemoSession()) return demo.demoEntryExit(body);
-  const { data } = await client.post('/api/analytics/entry-exit', body);
+  const { data } = await postAnalytics('/api/analytics/entry-exit', body, signal);
   return {
     records: pickArray(data, ['records', 'items', 'rows']),
     totalRecords: pickNumber(data, ['totalRecords', 'total']) ?? 0,

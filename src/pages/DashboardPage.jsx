@@ -19,6 +19,7 @@ import { getDemographics, getDwell, getFootfall, getOccupancy } from '../api/end
 import { PersonIcon, TrendDownIcon, TrendUpIcon } from '../components/Icons';
 import PageHeader from '../components/PageHeader';
 import { EmptyState, ErrorState, Skeleton } from '../components/States';
+import { useI18n } from '../i18n/I18nContext';
 import { useLive } from '../live/LiveContext';
 import { dayRanges, formatDwell, formatHour, percentChange } from '../utils/time';
 import { useAsync } from '../utils/useAsync';
@@ -33,22 +34,32 @@ const COLORS = {
 export default function DashboardPage() {
   const { dateKey } = useOutletContext();
   const { siteId, timeZone, live } = useLive();
+  const { t } = useI18n();
   const ranges = useMemo(() => dayRanges(dateKey, timeZone), [dateKey, timeZone]);
   const body = (r) => ({ siteId, ...r });
 
   // Each widget loads independently and all requests start together, so the page is not
   // bound by the slowest call and one failure doesn't blank the whole dashboard.
+  // Nothing is requested until the site list has picked a site: firing with siteId null
+  // sends a second, unscoped batch of heavy queries that competes with the real one.
   const deps = [siteId, ranges.current.fromUtc, ranges.current.toUtc];
+  const opts = { enabled: !!siteId };
   const occupancy = useAsync(
-    () => Promise.all([getOccupancy(body(ranges.current)), getOccupancy(body(ranges.previous))]),
-    deps
+    (signal) => Promise.all([getOccupancy(body(ranges.current), signal), getOccupancy(body(ranges.previous), signal)]),
+    deps,
+    opts
   );
   const footfall = useAsync(
-    () => Promise.all([getFootfall(body(ranges.current)), getFootfall(body(ranges.previous))]),
-    deps
+    (signal) => Promise.all([getFootfall(body(ranges.current), signal), getFootfall(body(ranges.previous), signal)]),
+    deps,
+    opts
   );
-  const dwell = useAsync(() => Promise.all([getDwell(body(ranges.current)), getDwell(body(ranges.previous))]), deps);
-  const demographics = useAsync(() => getDemographics(body(ranges.current)), deps);
+  const dwell = useAsync(
+    (signal) => Promise.all([getDwell(body(ranges.current), signal), getDwell(body(ranges.previous), signal)]),
+    deps,
+    opts
+  );
+  const demographics = useAsync((signal) => getDemographics(body(ranges.current), signal), deps, opts);
 
   // Live count from the socket wins while viewing today; otherwise the latest hourly bucket.
   const occ = useMemo(() => {
@@ -61,17 +72,17 @@ export default function DashboardPage() {
     return { value, change: percentChange(value, prevValue), buckets: cur.buckets, isLive: socketValue !== null };
   }, [occupancy.data, live, ranges.isToday]);
 
-  const compareLabel = ranges.isToday ? 'yesterday' : 'previous day';
+  const compareLabel = t(ranges.isToday ? 'dash.yesterday' : 'dash.previousDay');
 
   return (
     <div className="page">
-      <PageHeader title="Overview" />
+      <PageHeader title={t('nav.overview')} />
 
-      <h2 className="section-title">Occupancy</h2>
+      <h2 className="section-title">{t('dash.occupancy')}</h2>
       <div className="stats-row">
         <div className="card stats-group">
           <StatCard
-            title="Live Occupancy"
+            title={t('dash.liveOccupancy')}
             loading={occupancy.loading && !occupancy.data}
             error={occupancy.error}
             onRetry={occupancy.reload}
@@ -82,7 +93,7 @@ export default function DashboardPage() {
           />
           <div className="stats-sep" />
           <StatCard
-            title={ranges.isToday ? "Today's Footfall" : 'Footfall'}
+            title={t(ranges.isToday ? 'dash.todaysFootfall' : 'dash.footfall')}
             loading={footfall.loading && !footfall.data}
             error={footfall.error}
             onRetry={footfall.reload}
@@ -93,7 +104,7 @@ export default function DashboardPage() {
         </div>
         <div className="card">
           <StatCard
-            title="Avg Dwell Time"
+            title={t('dash.avgDwell')}
             loading={dwell.loading && !dwell.data}
             error={dwell.error}
             onRetry={dwell.reload}
@@ -106,8 +117,8 @@ export default function DashboardPage() {
 
       <div className="card chart-card">
         <div className="chart-head">
-          <h3>Overall Occupancy</h3>
-          <Legend items={[{ label: 'Occupancy', color: COLORS.occupancy }]} />
+          <h3>{t('dash.overallOccupancy')}</h3>
+          <Legend items={[{ label: t('dash.occupancy'), color: COLORS.occupancy }]} />
         </div>
         <OccupancyChart
           state={occupancy}
@@ -118,21 +129,21 @@ export default function DashboardPage() {
         />
       </div>
 
-      <h2 className="section-title">Demographics</h2>
+      <h2 className="section-title">{t('dash.demographics')}</h2>
       <div className="demo-row">
         <div className="card chart-card">
           <div className="chart-head">
-            <h3>Chart of Demographics</h3>
+            <h3>{t('dash.demographicsChart')}</h3>
           </div>
           <DemographicsDonut state={demographics} />
         </div>
         <div className="card chart-card">
           <div className="chart-head">
-            <h3>Demographics Analysis</h3>
+            <h3>{t('dash.demographicsAnalysis')}</h3>
             <Legend
               items={[
-                { label: 'Male', color: COLORS.male },
-                { label: 'Female', color: COLORS.female },
+                { label: t('dash.male'), color: COLORS.male },
+                { label: t('dash.female'), color: COLORS.female },
               ]}
             />
           </div>
@@ -144,11 +155,12 @@ export default function DashboardPage() {
 }
 
 function StatCard({ title, value, change, compareLabel, loading, error, onRetry, live }) {
+  const { t } = useI18n();
   return (
     <div className="stat">
       <div className="stat-title">
         {title}
-        {live && <span className="live-pill">LIVE</span>}
+        {live && <span className="live-pill">{t('dash.live')}</span>}
       </div>
       {loading ? (
         <>
@@ -156,7 +168,7 @@ function StatCard({ title, value, change, compareLabel, loading, error, onRetry,
           <Skeleton width={160} height={12} />
         </>
       ) : error ? (
-        <ErrorState compact message={errorMessage(error, 'Failed to load')} onRetry={onRetry} />
+        <ErrorState compact message={errorMessage(error, t('state.failed'))} onRetry={onRetry} />
       ) : (
         <>
           <div className="stat-value">{value}</div>
@@ -168,16 +180,15 @@ function StatCard({ title, value, change, compareLabel, loading, error, onRetry,
 }
 
 function ChangeIndicator({ change, compareLabel }) {
+  const { t } = useI18n();
   if (change === null || change === undefined || !Number.isFinite(change)) {
-    return <div className="stat-change neutral">No comparison data</div>;
+    return <div className="stat-change neutral">{t('dash.noComparison')}</div>;
   }
   const up = change >= 0;
   return (
     <div className={`stat-change ${up ? 'up' : 'down'}`}>
       {up ? <TrendUpIcon /> : <TrendDownIcon />}
-      <span>
-        {Math.abs(change).toFixed(0)}% {up ? 'More' : 'Less'} than {compareLabel}
-      </span>
+      <span>{t(up ? 'dash.more' : 'dash.less', { pct: Math.abs(change).toFixed(0), when: compareLabel })}</span>
     </div>
   );
 }
@@ -196,11 +207,12 @@ function Legend({ items }) {
 }
 
 function ChartBody({ state, isEmpty, height = 280, children }) {
+  const { t } = useI18n();
   if (state.loading && !state.data) return <Skeleton height={height} />;
   if (state.error)
     return (
       <div style={{ height }} className="chart-center">
-        <ErrorState message={errorMessage(state.error, 'Failed to load chart')} onRetry={state.reload} />
+        <ErrorState message={errorMessage(state.error, t('state.chartFailed'))} onRetry={state.reload} />
       </div>
     );
   if (isEmpty)
@@ -233,6 +245,7 @@ const axisProps = {
 };
 
 function OccupancyChart({ state, buckets, liveValue, showLive, timeZone }) {
+  const { t } = useI18n();
   const now = Date.now();
   const data = useMemo(() => {
     const rows = (buckets || []).map((b) => ({ t: b.t, value: b.value }));
@@ -260,16 +273,16 @@ function OccupancyChart({ state, buckets, liveValue, showLive, timeZone }) {
             tickFormatter={(t) => formatHour(t, timeZone)}
             {...axisProps}
           >
-            <Label value="Time" position="insideBottom" offset={-4} style={{ fontSize: 12, fill: '#3a4544' }} />
+            <Label value={t('dash.time')}position="insideBottom" offset={-4} style={{ fontSize: 12, fill: '#3a4544' }} />
           </XAxis>
           <YAxis {...axisProps} allowDecimals={false} width={48}>
-            <Label value="Count" angle={-90} position="insideLeft" style={{ fontSize: 12, fill: '#3a4544' }} />
+            <Label value={t('dash.count')}angle={-90} position="insideLeft" style={{ fontSize: 12, fill: '#3a4544' }} />
           </YAxis>
           <Tooltip content={<ChartTooltip timeZone={timeZone} />} />
           <Area
             type="monotone"
             dataKey="value"
-            name="Occupancy"
+            name={t('dash.occupancy')}
             stroke={COLORS.occupancy}
             strokeWidth={2}
             fill="url(#occFill)"
@@ -302,13 +315,14 @@ function LiveMarker({ viewBox }) {
 }
 
 function DemographicsDonut({ state }) {
+  const { t } = useI18n();
   const totals = state.data?.totals;
   const sum = totals ? totals.male + totals.female : 0;
   const malePct = sum ? Math.round((totals.male / sum) * 100) : 0;
   const femalePct = sum ? 100 - malePct : 0;
   const data = [
-    { name: 'Male', value: totals?.male ?? 0, color: COLORS.male },
-    { name: 'Female', value: totals?.female ?? 0, color: COLORS.female },
+    { name: t('dash.male'), value: totals?.male ?? 0, color: COLORS.male },
+    { name: t('dash.female'), value: totals?.female ?? 0, color: COLORS.female },
   ];
   return (
     <ChartBody state={state} isEmpty={!sum} height={260}>
@@ -335,7 +349,7 @@ function DemographicsDonut({ state }) {
                 content={({ viewBox }) => (
                   <g>
                     <text x={viewBox.cx} y={viewBox.cy - 6} textAnchor="middle" fontSize="11" fill="#5f6b6a">
-                      Total Crowd
+                      {t('dash.totalCrowd')}
                     </text>
                     <text x={viewBox.cx} y={viewBox.cy + 14} textAnchor="middle" fontSize="16" fontWeight="600" fill="#1d2827">
                       {sum.toLocaleString()}
@@ -350,11 +364,11 @@ function DemographicsDonut({ state }) {
         <ul className="donut-legend">
           <li>
             <PersonIcon style={{ color: COLORS.male }} />
-            <b>{malePct}%</b> Males <span className="muted">({totals?.male.toLocaleString()})</span>
+            <b>{malePct}%</b> {t('dash.males')} <span className="muted">({totals?.male.toLocaleString()})</span>
           </li>
           <li>
             <PersonIcon style={{ color: COLORS.female }} />
-            <b>{femalePct}%</b> Females <span className="muted">({totals?.female.toLocaleString()})</span>
+            <b>{femalePct}%</b> {t('dash.females')} <span className="muted">({totals?.female.toLocaleString()})</span>
           </li>
         </ul>
       </div>
@@ -363,6 +377,7 @@ function DemographicsDonut({ state }) {
 }
 
 function DemographicsTimeline({ state, timeZone }) {
+  const { t } = useI18n();
   const data = state.data?.buckets || [];
   return (
     <ChartBody state={state} isEmpty={!data.length} height={260}>
@@ -383,14 +398,14 @@ function DemographicsTimeline({ state, timeZone }) {
             tickFormatter={(t) => formatHour(t, timeZone)}
             {...axisProps}
           >
-            <Label value="Time" position="insideBottom" offset={-4} style={{ fontSize: 12, fill: '#3a4544' }} />
+            <Label value={t('dash.time')}position="insideBottom" offset={-4} style={{ fontSize: 12, fill: '#3a4544' }} />
           </XAxis>
           <YAxis {...axisProps} allowDecimals={false} width={48}>
-            <Label value="Count" angle={-90} position="insideLeft" style={{ fontSize: 12, fill: '#3a4544' }} />
+            <Label value={t('dash.count')}angle={-90} position="insideLeft" style={{ fontSize: 12, fill: '#3a4544' }} />
           </YAxis>
           <Tooltip content={<ChartTooltip timeZone={timeZone} />} />
-          <Area type="monotone" dataKey="male" name="Male" stroke={COLORS.male} strokeWidth={2} fill="url(#maleFill)" isAnimationActive={false} />
-          <Area type="monotone" dataKey="female" name="Female" stroke={COLORS.female} strokeWidth={2} fill="none" isAnimationActive={false} />
+          <Area type="monotone" dataKey="male" name={t('dash.male')} stroke={COLORS.male} strokeWidth={2} fill="url(#maleFill)" isAnimationActive={false} />
+          <Area type="monotone" dataKey="female" name={t('dash.female')} stroke={COLORS.female} strokeWidth={2} fill="none" isAnimationActive={false} />
         </AreaChart>
       </ResponsiveContainer>
     </ChartBody>

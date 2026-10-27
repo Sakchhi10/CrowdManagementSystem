@@ -5,6 +5,7 @@ import { getEntryExit } from '../api/endpoints';
 import { ChevronLeft, ChevronRight } from '../components/Icons';
 import PageHeader from '../components/PageHeader';
 import { EmptyState, ErrorState, Skeleton } from '../components/States';
+import { useI18n } from '../i18n/I18nContext';
 import { useLive } from '../live/LiveContext';
 import { dayRanges, formatDwellShort, formatTime } from '../utils/time';
 import { useAsync } from '../utils/useAsync';
@@ -14,6 +15,7 @@ const PAGE_SIZE = 15;
 export default function EntriesPage() {
   const { dateKey } = useOutletContext();
   const { siteId, timeZone } = useLive();
+  const { t } = useI18n();
   const [page, setPage] = useState(1);
   const ranges = useMemo(() => dayRanges(dateKey, timeZone), [dateKey, timeZone]);
 
@@ -22,8 +24,9 @@ export default function EntriesPage() {
 
   // One page per request; the server does the paging.
   const { data, loading, error, reload } = useAsync(
-    () => getEntryExit({ siteId, ...ranges.current, pageSize: PAGE_SIZE, pageNumber: page }),
-    [siteId, ranges.current.fromUtc, ranges.current.toUtc, page]
+    (signal) => getEntryExit({ siteId, ...ranges.current, pageSize: PAGE_SIZE, pageNumber: page }, signal),
+    [siteId, ranges.current.fromUtc, ranges.current.toUtc, page],
+    { enabled: !!siteId }
   );
 
   const totalPages = Math.max(1, data?.totalPages || 1);
@@ -31,16 +34,16 @@ export default function EntriesPage() {
 
   return (
     <div className="page">
-      <PageHeader title="Crowd Entries" />
+      <PageHeader title={t('nav.entries')} />
       <div className="card table-card">
         <table className="table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Sex</th>
-              <th>Entry</th>
-              <th>Exit</th>
-              <th>Dwell Time</th>
+              <th>{t('entries.name')}</th>
+              <th>{t('entries.sex')}</th>
+              <th>{t('entries.entry')}</th>
+              <th>{t('entries.exit')}</th>
+              <th>{t('entries.dwell')}</th>
             </tr>
           </thead>
           <tbody className={loading && data ? 'refreshing' : ''}>
@@ -57,14 +60,14 @@ export default function EntriesPage() {
             {error && (
               <tr>
                 <td colSpan={5}>
-                  <ErrorState message={errorMessage(error, 'Failed to load entries')} onRetry={reload} />
+                  <ErrorState message={errorMessage(error, t('entries.failed'))} onRetry={reload} />
                 </td>
               </tr>
             )}
             {!error && data && records.length === 0 && (
               <tr>
                 <td colSpan={5}>
-                  <EmptyState>No entries recorded for this day</EmptyState>
+                  <EmptyState>{t('entries.empty')}</EmptyState>
                 </td>
               </tr>
             )}
@@ -78,12 +81,12 @@ export default function EntriesPage() {
                         <span className="avatar" aria-hidden>
                           {(r.personName || '?').trim()[0]}
                         </span>
-                        {r.personName || r.personId || 'Unknown'}
+                        {r.personName || r.personId || t('entries.unknown')}
                       </span>
                     </td>
-                    <td>{formatGender(r.gender ?? r.sex)}</td>
+                    <td>{formatGender(r.gender ?? r.sex, t)}</td>
                     <td>{r.entryUtc ? formatTime(r.entryUtc, timeZone) : r.entryLocal || '—'}</td>
-                    <td>{inside ? <span className="inside-badge">Inside</span> : formatTime(r.exitUtc, timeZone)}</td>
+                    <td>{inside ? <span className="inside-badge">{t('entries.inside')}</span> : formatTime(r.exitUtc, timeZone)}</td>
                     <td>{inside ? '—' : formatDwellShort(r.dwellMinutes)}</td>
                   </tr>
                 );
@@ -99,11 +102,11 @@ export default function EntriesPage() {
   );
 }
 
-function formatGender(g) {
+function formatGender(g, t) {
   if (!g) return '—';
   const s = String(g).toLowerCase();
-  if (s.startsWith('m')) return 'Male';
-  if (s.startsWith('f')) return 'Female';
+  if (s.startsWith('m')) return t('dash.male');
+  if (s.startsWith('f')) return t('dash.female');
   return g;
 }
 
@@ -120,10 +123,11 @@ function pageList(page, total) {
 }
 
 function Pagination({ page, totalPages, onChange, disabled, total }) {
+  const { t } = useI18n();
   return (
-    <nav className="pagination" aria-label="Pagination">
-      <span className="muted page-count">{total?.toLocaleString()} records</span>
-      <button type="button" className="page-btn" onClick={() => onChange(page - 1)} disabled={disabled || page <= 1} aria-label="Previous page">
+    <nav className="pagination" aria-label={t('entries.pagination')}>
+      <span className="muted page-count">{t('entries.records', { count: total?.toLocaleString() })}</span>
+      <button type="button" className="page-btn" onClick={() => onChange(page - 1)} disabled={disabled || page <= 1} aria-label={t('entries.prev')}>
         <ChevronLeft />
       </button>
       {pageList(page, totalPages).map((p) =>
@@ -149,7 +153,7 @@ function Pagination({ page, totalPages, onChange, disabled, total }) {
         className="page-btn"
         onClick={() => onChange(page + 1)}
         disabled={disabled || page >= totalPages}
-        aria-label="Next page"
+        aria-label={t('entries.next')}
       >
         <ChevronRight />
       </button>
